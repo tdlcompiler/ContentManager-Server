@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace ContentManager_Server
 {
@@ -12,11 +13,11 @@ namespace ContentManager_Server
         private readonly List<IClientMessageObserver> observers = new List<IClientMessageObserver>();
         private TcpClient client;
         private NetworkStream stream;
-        private StreamWriter? writer;
+        private TextWriter? writer;
         private Aes aes;
         private string clientId;
         private string remoteEndPoint;
-        private User currentUser;
+        private User? currentUser;
 
         public ClientHandler(TcpClient client, string clientId, string remoteEndPoint) : base("ClientHandler")
         {
@@ -47,19 +48,45 @@ namespace ContentManager_Server
                 using (stream)
                 {
                     using StreamReader reader = new StreamReader(stream, Encoding.UTF8);
-                    writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
-                    writer.WriteLine(EncryptMessage("Welcome to the server!"));
-                    writer.WriteLine(EncryptMessage($"setloadingimage~{Server.ImageService?.GetFileInStringFormat(Server.ImageService.LoadingImage)}"));
 
-                    string clientMessage;
-                    while ((clientMessage = reader.ReadLine()) != null)
+                    writer = TextWriter.Synchronized(new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true });
+                    string? loadingImageBase64 = Server.ImageService?.GetFileInStringFormat(Server.ImageService.LoadingImage);
+
+                    if (!string.IsNullOrEmpty(loadingImageBase64))
+                        SendMessageToClient("setloadingimage", new List<string> { loadingImageBase64 });
+
+                    StringBuilder clientMessageBuilder = new StringBuilder();
+                    string clientMessageChunk;
+                    while ((clientMessageChunk = reader.ReadLine()) != null)
                     {
-                        HandleMessageFromClient(DecryptMessage(clientMessage));
-                        /* Logger.Instance.Log("Received: " + decryptedMessage, this);
+                        if (clientMessageChunk == "~end~")
+                        {
+                            string encryptedMessage = clientMessageBuilder.ToString();
 
-                           string response = "Echo: " + decryptedMessage;
-                           string encryptedResponse = EncryptMessage(response);
-                           writer.WriteLine(encryptedResponse); */
+                            // Логирование для отладки
+                            Logger.Instance.Log($"Complete encrypted message: {encryptedMessage}", this);
+
+                            try
+                            {
+                                string decryptedMessage = DecryptMessage(encryptedMessage);
+                                HandleMessageFromClient(decryptedMessage);
+                            }
+                            catch (FormatException ex)
+                            {
+                                Logger.Instance.Log($"Decryption error: {ex.Message}. Encrypted message: {encryptedMessage}", this);
+                            }
+
+                            clientMessageBuilder.Clear();
+                        }
+                        else if (clientMessageChunk.StartsWith("~chunk~"))
+                        {
+                            string chunkData = clientMessageChunk.Remove(0, 7); // Убираем префикс ~chunk~
+
+                            // Логирование для отладки
+                            Logger.Instance.Log($"Received chunk: {chunkData}", this);
+
+                            clientMessageBuilder.Append(chunkData);
+                        }
                     }
                 }
             }
@@ -88,23 +115,87 @@ namespace ContentManager_Server
             HandleClientDisconnect();
         }
 
-        public void SendMessageToClient(string message)
+        public void SendMessageToClient(string command, List<string> args)
         {
-            if (writer == null)
+            lock (lockObject)
             {
-                Logger.Instance.Log("StreamWriter is not initialized.", this);
-                return;
-            }
+                if (writer == null)
+                {
+                    Logger.Instance.Log("StreamWriter is not initialized.", this);
+                    return;
+                }
 
-            string encryptedMessage = EncryptMessage(message);
+                StringBuilder message = new StringBuilder(command);
+                foreach (string arg in args)
+                {
+                    message.Append($"~sp~{arg}");
+                }
 
-            try
-            {
-                writer.WriteLine(encryptedMessage);
+                string encryptedMessage = EncryptMessage(message.ToString());
+                int chunkSize = 32768; // Размер чанка, например, 2048 символов
+                try
+                {
+                    // Отправляем сообщение чанками
+                    for (int i = 0; i < encryptedMessage.Length; i += chunkSize)
+                    {
+                        string chunk = encryptedMessage.Substring(i, Math.Min(chunkSize, encryptedMessage.Length - i));
+                        writer.WriteLine($"~chunk~{chunk}");
+                    }
+                    // Отправляем конец передачи
+                    writer.WriteLine("~end~");
+                }
+                catch (IOException ex)
+                {
+                    Logger.Instance.Log($"Error sending message to client {clientId}: {ex.Message}", this);
+                }
+                catch (Exception e)
+                {
+                    Logger.Instance.Log($"Error: {e}", this);
+                }
             }
-            catch (IOException ex)
+        }
+
+        static object lockObject = new object();
+
+        public void SendMessageToClient(params string[] args)
+        {
+            lock (lockObject)
             {
-                Logger.Instance.Log($"Error sending message to client {clientId}: {ex.Message}", this);
+                if (writer == null)
+                {
+                    Logger.Instance.Log("StreamWriter is not initialized.", this);
+                    return;
+                }
+
+                StringBuilder message = new StringBuilder();
+                foreach (string command in args)
+                {
+                    message.Append($"{command}~sp~");
+                }
+                message.Remove(message.Length - 4, 4); // Удаление последнего "~sp~"
+
+                string encryptedMessage = EncryptMessage(message.ToString());
+                int chunkSize = 32768; // Размер чанка, например, 1024 символа
+
+                try
+                {
+                    // Отправляем сообщение чанками
+                    for (int i = 0; i < encryptedMessage.Length; i += chunkSize)
+                    {
+                        string chunk = encryptedMessage.Substring(i, Math.Min(chunkSize, encryptedMessage.Length - i));
+                        writer.WriteLine($"~chunk~{chunk}");
+                    }
+                    // Отправляем конец передачи
+                    writer.WriteLine("~end~");
+                }
+                catch (IOException ex)
+                {
+                    Logger.Instance.Log($"Error sending message to client {clientId}: {ex.Message}", this);
+                }
+                catch (Exception e)
+                {
+                    Logger.Instance.Log($"Error: {e}", this);
+                }
             }
         }
 
@@ -144,10 +235,46 @@ namespace ContentManager_Server
                 case "auth":
                     HandleAuthentication(args);
                     return true;
+                case "getimagebyid":
+                    _ = HandleRequestToLoadImages(args);
+                    return true;
                 default:
                     Logger.Instance.Log($"Ошибка: Неизвестная команда '{command}'.", this);
                     return false;
             }
+        }
+
+        private async Task HandleRequestToLoadImages(string[] args)
+        {
+            FileData? imageFile = null;
+            if (args.Length == 1 && Server.ImageService != null && Server.DatabaseController != null)
+            {
+                imageFile = await Server.DatabaseController.GetFileDataByKeyAsync(args[0]);
+            }
+
+            if (imageFile != null)
+            {
+                List<FileData> images = new List<FileData>
+                {
+                    imageFile
+                };
+                SendImages(images);
+            }
+        }
+
+        private void SendImages(List<FileData> images)
+        {
+            if (Server.DatabaseController == null || Server.ImageService == null)
+                return;
+            string? strImage;
+            List<string> args = new List<string>();
+            foreach (FileData image in images)
+            {
+                strImage = Server.ImageService.GetFileInStringFormat(image);
+                args.Add($"{image.FileKey}:key:{strImage}");
+            }
+            SendMessageToClient("loadimages", args);
+            return;
         }
 
         private async void HandleRegistration(string[] args)
@@ -176,14 +303,14 @@ namespace ContentManager_Server
 
             bool loginIsTaken = await Server.DatabaseController.IsLoginTakenAsync(login);
             if (loginIsTaken)
-                SendMessageToClient("reg_result~login_is_taken");
+                SendMessageToClient("reg_result", "login_is_taken");
             else
             {
                 bool added = await Server.DatabaseController.AddEntityAsync(currentUser = new User { Login = login, PasswordHash = HashPassword(password), FixedKey = clientId, RoleId = 4 });
                 if (added)
-                    SendMessageToClient("reg_result~completed");
+                    SendMessageToClient("reg_result", "completed");
                 else
-                    SendMessageToClient("reg_result~internal_error");
+                    SendMessageToClient("reg_result", "internal_error");
             }
         }
 
@@ -220,14 +347,14 @@ namespace ContentManager_Server
                     if (correctPass)
                     {
                         AddObserver(new AuthClientHandler(this, user));
-                        SendMessageToClient($"auth_result~allowed~{user.RoleId}");
+                        SendMessageToClient("auth_result", "allowed", user.RoleId.ToString());
                         currentUser = user;
                     }
                     else
-                        SendMessageToClient("auth_result~incorrect_pass~-1");
+                        SendMessageToClient("auth_result", "incorrect_pass", "-1");
                 }
                 else
-                    SendMessageToClient("auth_result~incorrect~-1");
+                    SendMessageToClient("auth_result", "incorrect", "-1");
             }
             catch (Exception ex)
             {

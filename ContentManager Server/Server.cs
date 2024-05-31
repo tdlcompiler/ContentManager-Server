@@ -1,6 +1,9 @@
 ﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using Microsoft.Extensions.Logging;
+using System.Text;
 using Newtonsoft.Json;
 
 namespace ContentManager_Server
@@ -16,9 +19,47 @@ namespace ContentManager_Server
         private static CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
         private static ManualResetEvent shutdownEvent = new ManualResetEvent(false);
         private static bool isShuttingDown = false;
+        private static int _firstChanceExceptionReentrancyLocked;
 
         static async Task Main(string[] args)
         {
+            AppDomain.CurrentDomain.FirstChanceException += (sender, eventArgs) =>
+            {
+                if (Interlocked.CompareExchange(ref _firstChanceExceptionReentrancyLocked, 1, 0) == 0)
+                {
+                    try
+                    {
+                        StackTrace currentStackTrace;
+
+                        try
+                        {
+                            currentStackTrace = new StackTrace(1, true);
+                        }
+                        catch
+                        {
+                            currentStackTrace = null;
+                        }
+
+                        Logger.Instance.Log(new StringBuilder()
+                            .AppendLine($"{DateTime.Now:O} exception thrown: {eventArgs.Exception.Message}")
+                            .AppendLine("----- Exception -----")
+                            .AppendLine(eventArgs.Exception.ToString().TrimEnd())
+                            .AppendLine("----- Full Stack -----")
+                            .AppendLine(currentStackTrace?.ToString().TrimEnd())
+                            .AppendLine()
+                            .ToString());
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                    finally
+                    {
+                        Interlocked.Exchange(ref _firstChanceExceptionReentrancyLocked, 0);
+                    }
+                }
+            };
+
             int port = 12361; // стандартный порт
 
             DatabaseController = new DBController("127.0.0.1", "contentmanagerapp_db", "root", "DeNiskA22565");
@@ -26,7 +67,7 @@ namespace ContentManager_Server
             try
             {
                 var config = ReadConfig(CONFIG_PATH);
-                if (config.Port > 0 && config.Port <= 65535)
+                if (config?.Port > 0 && config.Port <= 65535)
                 {
                     port = config.Port;
                 }
@@ -43,14 +84,13 @@ namespace ContentManager_Server
             await DatabaseController.NormalizeTablesAsync();
 
             ImageService = new ImageService(DatabaseController);
+            ImageService.LoadingImage = await DatabaseController.GetLoadingImageFileAsync();
 
             listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
             Logger.Instance.Log($"Server started on port {port}...");
 
             ConsoleService = new ConsoleService();
-
-            ImageService.LoadingImage = await DatabaseController.GetLoadingImageFileAsync();
 
             // Добавляем обработчики событий завершения работы приложения
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
@@ -65,6 +105,8 @@ namespace ContentManager_Server
 
         private static async Task AcceptClientsAsync(CancellationToken cancellationToken)
         {
+            if (listener == null)
+                return;
             try
             {
                 while (!cancellationToken.IsCancellationRequested)
@@ -117,7 +159,7 @@ namespace ContentManager_Server
             }
         }
 
-        private static ServerConfig ReadConfig(string filePath)
+        private static ServerConfig? ReadConfig(string filePath)
         {
             string json = File.ReadAllText(filePath);
             return JsonConvert.DeserializeObject<ServerConfig>(json);
@@ -142,6 +184,11 @@ namespace ContentManager_Server
             }
 
             return new string(stringChars);
+        }
+
+        public static int GetCountActiveUsers()
+        {
+            return clients.Count;
         }
 
         private static void CloseServer()

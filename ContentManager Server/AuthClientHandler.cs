@@ -1,5 +1,4 @@
 ﻿using ContentManager_Server.DatabaseEntityCore;
-using System.Text;
 
 namespace ContentManager_Server
 {
@@ -32,7 +31,10 @@ namespace ContentManager_Server
             switch (command.ToLower())
             {
                 case "getuserinfo":
-                    _ = HandleGetUserInfo();
+                    HandleGetUserInfo();
+                    return true;
+                case "getserverinfo":
+                    HandleGetServerInfo();
                     return true;
                 case "geteditprofileinfo":
                     _ = HandleEditProfileMenuInfo();
@@ -45,15 +47,19 @@ namespace ContentManager_Server
             }
         }
 
+        private void HandleGetServerInfo()
+        {
+            SendMessageToClient("updateserverinfo", Server.GetCountActiveUsers().ToString());
+        }
+
         private async Task UpdateUserAvatar(string[] args)
         {
             if (args.Length > 0 && Server.DatabaseController != null && Server.ImageService != null)
             {
                 currentUser.AvatarId = args[0];
                 await Server.DatabaseController.UpdateEntityAsync(currentUser, currentUser.Id);
-                await HandleGetUserInfo();
-                string? strImage = await Server.ImageService.GetFileInStringFormatAsync(currentUser.AvatarId);
-                SendMessageToClient($"seteditprofiledata~{currentUser.Nickname}~{currentUser.Role.Name}~{strImage}");
+                HandleGetUserInfo();
+                SendMessageToClient("seteditprofiledata", currentUser.Nickname, currentUser.Role.Name, currentUser.AvatarId);
             }
         }
 
@@ -61,39 +67,46 @@ namespace ContentManager_Server
         {
             if (Server.DatabaseController == null || Server.ImageService == null)
                 return false;
-            StringBuilder sb = new StringBuilder("setuseravatarimages");
             List<FileData>? images = await Server.DatabaseController.GetFilesByFileTypeAndDescAsync(TypeFile.IMAGE, "Avatar Image File");
             if (images == null)
                 return false;
-            string? strImage;
+
+            List<string> args = new List<string>();
             foreach (FileData image in images)
             {
-                strImage = Server.ImageService.GetFileInStringFormat(image);
-                sb.Append($"~{image.FileKey}:{strImage}");
+                args.Add(image.FileKey);
             }
-            SendMessageToClient(sb.ToString());
-            strImage = await Server.ImageService.GetFileInStringFormatAsync(currentUser.AvatarId);
-            SendMessageToClient($"seteditprofiledata~{currentUser.Nickname}~{currentUser.Role.Name}~{strImage}");
+            try
+            {
+                SendMessageToClient("setuseravatarimages", args);
+                SendMessageToClient("seteditprofiledata", currentUser.Nickname, currentUser.Role.Name, currentUser.AvatarId);
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log(ex.ToString());
+            }
             return true;
         }
 
-        private async Task<bool> HandleGetUserInfo()
+        private bool HandleGetUserInfo()
         {
-            string userAvatar = string.Empty;
-            string userInfo = $"setuserinfo~{currentUser.Nickname}~{currentUser.Role.Name}";
             if (Server.ImageService != null)
             {
-                string? strImage = await Server.ImageService.GetFileInStringFormatAsync(currentUser.AvatarId);
-                userAvatar = $".png~{strImage}~update_user_avatar";
+                string imageId = currentUser.AvatarId;
+                SendMessageToClient(".png", imageId, "update_user_avatar");
             }
-            SendMessageToClient(userInfo);
-            SendMessageToClient(userAvatar);
+            SendMessageToClient("setuserinfo", currentUser.Nickname, currentUser.Role.Name);
             return true;
         }
 
-        private void SendMessageToClient(string message)
+        private void SendMessageToClient(string command, List<string> args)
         {
-            clientHandler.SendMessageToClient(message);
+            clientHandler.SendMessageToClient(command, args);
+        }
+
+        private void SendMessageToClient(params string[] args)
+        {
+            clientHandler.SendMessageToClient(args);
         }
 
         public void Dispose()
