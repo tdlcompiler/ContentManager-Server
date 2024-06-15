@@ -25,44 +25,7 @@ namespace ContentManager_Server
 
         static async Task Main(string[] args)
         {
-            AppDomain.CurrentDomain.FirstChanceException += (sender, eventArgs) =>
-            {
-                if (Interlocked.CompareExchange(ref _firstChanceExceptionReentrancyLocked, 1, 0) == 0)
-                {
-                    try
-                    {
-                        StackTrace? currentStackTrace;
-
-                        try
-                        {
-                            currentStackTrace = new StackTrace(1, true);
-                        }
-                        catch
-                        {
-                            currentStackTrace = null;
-                        }
-
-                        Logger.Instance.Log(new StringBuilder()
-                            .AppendLine($"{DateTime.Now:O} exception thrown: {eventArgs.Exception.Message}")
-                            .AppendLine("----- Exception -----")
-                            .AppendLine(eventArgs.Exception.ToString().TrimEnd())
-                            .AppendLine("----- Full Stack -----")
-                            .AppendLine(currentStackTrace?.ToString().TrimEnd())
-                            .AppendLine()
-                            .ToString());
-                    }
-                    catch
-                    {
-                        // ignored
-                    }
-                    finally
-                    {
-                        Interlocked.Exchange(ref _firstChanceExceptionReentrancyLocked, 0);
-                    }
-                }
-            };
-
-            int port = 12361; // стандартный порт
+            int port = 12361;
 
             DatabaseController = new DBController("127.0.0.1", "contentmanagerapp_db", "root", "DeNiskA22565");
             await DatabaseController.NormalizeTablesAsync();
@@ -94,8 +57,7 @@ namespace ContentManager_Server
             Logger.Instance.Log($"Server started on port {port}...");
 
             ConsoleService = new ConsoleService();
-
-            // Добавляем обработчики событий завершения работы приложения
+s
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
             Console.CancelKeyPress += (sender, e) =>
             {
@@ -117,7 +79,9 @@ namespace ContentManager_Server
                     if (listener.Pending())
                     {
                         TcpClient client = await listener.AcceptTcpClientAsync();
-                        var remoteEndPoint = $"{((IPEndPoint)client.Client.RemoteEndPoint).Address}:{((IPEndPoint)client.Client.RemoteEndPoint).Port}";
+                        if (client.Client.RemoteEndPoint is not IPEndPoint endPoint)
+                            return;
+                        var remoteEndPoint = $"{endPoint.Address}:{endPoint.Port}";
                         string clientId = GenerateClientId();
                         Logger.Instance.Log($"Client {remoteEndPoint} with ID {clientId} connected.");
                         ClientHandler handler = new ClientHandler(client, clientId, remoteEndPoint);
@@ -133,7 +97,8 @@ namespace ContentManager_Server
             }
             catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
             {
-                // Исключение ObjectDisposedException ожидается при остановке listener
+                // Исключение ObjectDisposedException ожидается при остановке listener, поэтому не трогаем, но ловим,
+                // чтобы не засорять консоль
             }
             catch (Exception ex)
             {
@@ -272,6 +237,6 @@ namespace ContentManager_Server
 
     class ServerConfig
     {
-        public int Port { get; set; }
+        public int Port { get; set; } = 12361;
     }
 }
