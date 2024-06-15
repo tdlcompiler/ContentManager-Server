@@ -7,7 +7,9 @@ namespace ContentManager_Server.DatabaseEntityCore
         public int Id { get; set; }
 
         [Required]
-        public string Text { get; set; }
+        public string Content { get; set; } = string.Empty;
+        [Required]
+        public string SenderName { get; set; } = string.Empty;
 
         public int ChapterId { get; set; }
         public Chapter Chapter { get; set; }

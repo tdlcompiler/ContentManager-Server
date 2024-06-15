@@ -26,7 +26,8 @@
                     case "/help":
                         Logger.Instance.Log("Available commands:", this);
                         Logger.Instance.Log("/help - Show this help message", this);
-                        Logger.Instance.Log("/add_image <path> - Add an image from the specified path", this);
+                        Logger.Instance.Log("/add_image - Add an image", this);
+                        Logger.Instance.Log("/get_image <path> - Get an image from the specified path", this);
                         break;
 
                     case "/add_image":

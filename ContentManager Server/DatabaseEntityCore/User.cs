@@ -11,16 +11,16 @@ namespace ContentManager_Server.DatabaseEntityCore
         public UserRole Role { get; set; }
 
         [Required]
-        public string FixedKey { get; set; }
+        public string FixedKey { get; set; } = string.Empty;
 
         [Required]
-        public string Login { get; set; }
+        public string Login { get; set; } = string.Empty;
 
         [Required]
-        public string PasswordHash { get; set; }
+        public string PasswordHash { get; set; } = string.Empty;
 
-        public string Nickname { get; set; }
+        public string Nickname { get; set; } = string.Empty;
 
-        public string AvatarId { get; set; }
+        public string AvatarId { get; set; } = string.Empty;
     }
 }

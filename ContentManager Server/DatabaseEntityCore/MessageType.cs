@@ -7,7 +7,7 @@ namespace ContentManager_Server.DatabaseEntityCore
         public int Id { get; set; }
 
         [Required]
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
 
         public ICollection<Message> Messages { get; set; }
     }

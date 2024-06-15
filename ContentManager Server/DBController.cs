@@ -23,9 +23,7 @@
 
         public async Task NormalizeTablesAsync()
         {
-            try
-            {
-                var requiredRoles = new List<UserRole>
+            var requiredRoles = new List<UserRole>
             {
                 new UserRole { Name = "Владелец", Description = "Owner role", Id = (int)UserType.OWNER },
                 new UserRole { Name = "Администратор", Description = "Administrator role", Id = (int)UserType.ADMINISTRATOR },
@@ -33,53 +31,47 @@
                 new UserRole { Name = "Простой пользователь", Description = "Read-only user role", Id = (int)UserType.RO_USER }
             };
 
-                foreach (var role in requiredRoles)
-                {
-                    using (var context = _contextManager.CreateDbContext())
-                    {
-                        var existingRole = await GetEntityByIdAsync<UserRole>(role.Id, context);
-                        if (existingRole == null)
-                        {
-                            await context.UserRole.AddAsync(role);
-                        }
-                        else
-                        {
-                            existingRole.Description = role.Description;
-                            context.UserRole.Update(existingRole);
-                        }
-                        await context.SaveChangesAsync();
-                    }
-                }
-
-                var requiredFileTypes = new List<FileType>
+            var requiredFileTypes = new List<FileType>
             {
                 new FileType { Name = "Изображения", Description = "Image files", Extension = "png;gif", Id = (int)TypeFile.IMAGE },
                 new FileType { Name = "Префабы", Description = "Unity-Prefab files", Extension = "prefab", Id = (int)TypeFile.PREFAB }
             };
 
-                foreach (var type in requiredFileTypes)
-                {
-                    using (var context = _contextManager.CreateDbContext())
-                    {
-                        var existingType = await GetEntityByIdAsync<FileType>(type.Id, context);
-                        if (existingType == null)
-                        {
-                            await context.FileType.AddAsync(type);
-                        }
-                        else
-                        {
-                            existingType.Description = type.Description;
-                            context.FileType.Update(existingType);
-                        }
-                        await context.SaveChangesAsync();
-                    }
-                }
+            var requiredMessageTypes = new List<MessageType>
+            {
+                new MessageType { Name = "Текстовое сообщение", Id = (int)TypeMessage.TEXT },
+                new MessageType { Name = "Изображение", Id = (int)TypeMessage.IMAGE },
+                new MessageType { Name = "Стикер", Id = (int)TypeMessage.STICKER }
+            };
 
+            try
+            {
+                using var context = _contextManager.CreateDbContext();
+                await NormalizeEntitiesAsync(requiredRoles, context);
+                await NormalizeEntitiesAsync(requiredFileTypes, context);
+                await NormalizeEntitiesAsync(requiredMessageTypes, context);
                 Logger.Instance.Log("All required tables have been normalized successfully.", this);
             }
             catch (Exception ex)
             {
                 Logger.Instance.Log("Error: " + ex.Message, this);
+            }
+        }
+
+        private async Task NormalizeEntitiesAsync<T>(List<T> requiredEntities, ApplicationDbContext context) where T : class
+        {
+            foreach (var entity in requiredEntities)
+            {
+                var existingEntity = await context.Set<T>().FindAsync(context.Entry(entity).Property("Id").CurrentValue);
+                if (existingEntity == null)
+                {
+                    await context.Set<T>().AddAsync(entity);
+                }
+                else
+                {
+                    context.Entry(existingEntity).CurrentValues.SetValues(entity);
+                }
+                await context.SaveChangesAsync();
             }
         }
 
@@ -125,6 +117,111 @@
             }
         }
 
+        public async Task<List<User>?> GetUsersInRangeAsync(int startIndex, int endIndex)
+        {
+            using var context = _contextManager.CreateDbContext();
+            try
+            {
+                var entities = await context.User
+                                            .Where(u => u.Id >= startIndex && u.Id <= endIndex)
+                                            .Select(u => new User
+                                            {
+                                                Id = u.Id,
+                                                Login = u.Login ?? string.Empty,
+                                                FixedKey = u.FixedKey ?? string.Empty,
+                                                PasswordHash = u.PasswordHash ?? string.Empty,
+                                                Nickname = u.Nickname ?? string.Empty,
+                                                AvatarId = u.AvatarId ?? string.Empty,
+                                                RoleId = u.Role.Id,
+                                                Role = new UserRole
+                                                {
+                                                    Id = u.Role.Id,
+                                                    Name = u.Role.Name ?? string.Empty,
+                                                    Description = u.Role.Description ?? string.Empty
+                                                }
+                                            })
+                                            .ToListAsync();
+                Logger.Instance.Log($"Entities of type {typeof(User).Name} with Ids from {startIndex} to {endIndex} retrieved successfully.", this);
+                return entities;
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
+        public async Task<List<Author>?> GetAuthorsInRangeAsync(int startIndex, int endIndex)
+        {
+            using var context = _contextManager.CreateDbContext();
+            try
+            {
+                var entities = await context.Author
+                                            .Where(a => a.Id >= startIndex && a.Id <= endIndex)
+                                            .Select(a => new Author
+                                            {
+                                                Id = a.Id,
+                                                Name = a.Name ?? string.Empty,
+                                                Country = a.Country ?? string.Empty
+                                            })
+                                            .ToListAsync();
+                Logger.Instance.Log($"Entities of type {typeof(Author).Name} with Ids from {startIndex} to {endIndex} retrieved successfully.", this);
+                return entities;
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
+        public async Task<List<Message>?> GetChapterMessagesInRange(int chapterId, int startIndex, int endIndex)
+        {
+            using var context = _contextManager.CreateDbContext();
+            try
+            {
+                var entities = await context.Message
+                                            .Where(a => a.ChapterId == chapterId && a.Id >= startIndex && a.Id <= endIndex)
+                                            .Select(a => new Message
+                                            {
+                                                Id = a.Id,
+                                                ChapterId = a.ChapterId,
+                                                Content = a.Content ?? string.Empty,
+                                                MessageTypeId = a.MessageTypeId,
+                                                SenderName = a.SenderName ?? string.Empty
+                                            })
+                                            .ToListAsync();
+                Logger.Instance.Log($"Entities of type {typeof(Message).Name} with Ids from {startIndex} to {endIndex} and chapterId: {chapterId} retrieved successfully.", this);
+                return entities;
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
+        public async Task<List<Novel>?> GetNovelsInRangeAsync(int startIndex, int endIndex)
+        {
+            using var context = _contextManager.CreateDbContext();
+            try
+            {
+                var entities = await context.Novel
+                                            .Include(n => n.Author)
+                                            .Include(n => n.Chapters)
+                                            .Where(n => n.Id >= startIndex && n.Id <= endIndex)
+                                            .AsNoTracking()
+                                            .ToListAsync();
+                Logger.Instance.Log($"Entities of type {typeof(Novel).Name} with Ids from {startIndex} to {endIndex} retrieved successfully.", this);
+                return entities;
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
         public async Task<FileType?> GetFileTypeByTypeFile(TypeFile type)
         {
             using (var context = _contextManager.CreateDbContext())
@@ -138,6 +235,48 @@
             using (var context = _contextManager.CreateDbContext())
             {
                 return await context.FileData.Include(f => f.Type).FirstOrDefaultAsync(fd => fd.FileKey == fileKey);
+            }
+        }
+
+        public async Task<Author?> GetAuthorByIdAsync(int authorId)
+        {
+            using (var context = _contextManager.CreateDbContext())
+            {
+                return await GetEntityByIdAsync<Author>(authorId, context);
+            }
+        }
+
+        public async Task<Novel?> GetNovelByIdAsync(int novelId)
+        {
+            using (var context = _contextManager.CreateDbContext())
+            {
+                return await GetEntityByIdAsync<Novel>(novelId, context);
+            }
+        }
+
+        public async Task<string?> GetDefaultUserAvatarKeyAsync()
+        {
+            try
+            {
+                var type = await GetFileTypeByTypeFile(TypeFile.IMAGE);
+                using (var context = _contextManager.CreateDbContext())
+                {
+                    if (type != null)
+                    {
+                        var file = await context.FileData.Include(f => f.Type).FirstOrDefaultAsync(fd => fd.TypeId == type.Id && fd.FileDescription == "Default Avatar Image File");
+                        return file?.FileKey;
+                    }
+                    else
+                    {
+                        Logger.Instance.Log($"'{type?.Name}' file type not found.", this);
+                        return null;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log($"Error retrieving '{TypeFile.IMAGE}' files: {ex.Message}", this);
+                return null;
             }
         }
 
@@ -193,7 +332,7 @@
             }
         }
 
-        public async Task<User?> GetUserByLoginAsync<T>(string login) where T : class
+        public async Task<User?> GetUserByLoginAsync(string login)
         {
             try
             {
@@ -223,8 +362,76 @@
 
                     if (user != null)
                     {
-                        Logger.Instance.Log($"Entity {typeof(T).Name} with Login {login} retrieved successfully.", this);
+                        Logger.Instance.Log($"Entity {typeof(User).Name} with Login {login} retrieved successfully.", this);
                         return user;
+                    }
+
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
+        public async Task<User?> GetUserByIdAsync(int id)
+        {
+            try
+            {
+                using (var context = _contextManager.CreateDbContext())
+                {
+                    var user = await context.User
+                        .Include(u => u.Role)
+                        .Where(u => u.Id == id)
+                        .Select(u => new User
+                        {
+                            Id = u.Id,
+                            Login = u.Login ?? string.Empty,
+                            FixedKey = u.FixedKey ?? string.Empty,
+                            PasswordHash = u.PasswordHash ?? string.Empty,
+                            Nickname = u.Nickname ?? string.Empty,
+                            AvatarId = u.AvatarId ?? string.Empty,
+                            RoleId = u.Role.Id,
+                            Role = new UserRole
+                            {
+                                Id = u.Role.Id,
+                                Name = u.Role.Name ?? string.Empty,
+                                Description = u.Role.Description ?? string.Empty,
+                                Users = u.Role.Users
+                            }
+                        })
+                        .FirstOrDefaultAsync();
+
+                    if (user != null)
+                    {
+                        Logger.Instance.Log($"Entity {typeof(User).Name} with Id {id} retrieved successfully.", this);
+                        return user;
+                    }
+
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
+        public async Task<UserRole?> GetUserRoleByIdAsync(int id)
+        {
+            try
+            {
+                using (var context = _contextManager.CreateDbContext())
+                {
+                    UserRole? role = await GetEntityByIdAsync<UserRole>(id, context);
+
+                    if (role != null)
+                    {
+                        Logger.Instance.Log($"Entity {typeof(UserRole).Name} with Id {id} retrieved successfully.", this);
+                        return role;
                     }
 
                     return null;
@@ -290,9 +497,26 @@
                     if (existingEntity != null)
                     {
                         context.Entry(existingEntity).CurrentValues.SetValues(entity);
+
+                        if (entity is Novel novel)
+                        {
+                            var existingNovel = existingEntity as Novel;
+                            if (existingNovel != null)
+                            {
+                                context.Entry(existingNovel).Collection(n => n.Chapters).Load();
+                                UpdateChapters(existingNovel.Chapters, novel.Chapters, context);
+                            }
+                        }
+
                         await context.SaveChangesAsync();
 
                         Logger.Instance.Log($"Entity {typeof(T).Name} updated successfully.", this);
+
+                        if (entity is User user)
+                            Server.SendUpdateUserToOwners(user);
+                        else if (entity is Author author)
+                            Server.SendUpdateAuthorToUsers(author);
+
                         return true;
                     }
                     else
@@ -306,6 +530,30 @@
             {
                 Logger.Instance.Log("Error: " + ex.Message, this);
                 return false;
+            }
+        }
+
+        private void UpdateChapters(ICollection<Chapter> existingChapters, ICollection<Chapter> newChapters, DbContext context)
+        {
+            var existingChapterIds = existingChapters.Select(c => c.Id).ToList();
+            var newChapterIds = newChapters.Select(c => c.Id).ToList();
+
+            foreach (var existingChapter in existingChapters.Where(c => !newChapters.Any(nc => nc.Title == c.Title)).ToList())
+            {
+                context.Set<Chapter>().Remove(existingChapter);
+            }
+
+            foreach (var newChapter in newChapters)
+            {
+                var existingChapter = existingChapters.FirstOrDefault(c => c.Title == newChapter.Title);
+                if (existingChapter != null)
+                {
+                    context.Entry(existingChapter).CurrentValues.SetValues(new Chapter { Title = newChapter.Title, Id = existingChapter.Id, NovelId = existingChapter.NovelId });
+                }
+                else
+                {
+                    existingChapters.Add(new Chapter { Title = newChapter.Title });
+                }
             }
         }
 
@@ -327,8 +575,9 @@
             }
         }
 
-        public async Task<List<T>?> GetAllEntitiesAsync<T>(ApplicationDbContext context) where T : class
+        public async Task<List<T>?> GetAllEntitiesAsync<T>() where T : class
         {
+            using var context = _contextManager.CreateDbContext();
             try
             {
                 var entities = await context.Set<T>().ToListAsync();
@@ -355,6 +604,14 @@
         ADMINISTRATOR,
         EDITOR,
         RO_USER
+    }
+
+    public enum TypeMessage
+    {
+        NULL,
+        TEXT,
+        IMAGE,
+        STICKER
     }
 
     public enum TypeFile

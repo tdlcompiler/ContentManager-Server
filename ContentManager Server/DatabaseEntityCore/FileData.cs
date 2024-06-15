@@ -11,8 +11,8 @@ namespace ContentManager_Server.DatabaseEntityCore
         public FileType Type { get; set; }
 
         [Required]
-        public string FileKey { get; set; }
+        public string FileKey { get; set; } = string.Empty;
 
-        public string FileDescription { get; set; }
+        public string FileDescription { get; set; } = string.Empty;
     }
 }

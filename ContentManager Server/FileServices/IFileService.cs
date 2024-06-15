@@ -4,7 +4,7 @@ namespace ContentManager_Server
 {
     public interface IFileService
     {
-        Task AddFileAsync();
+        Task<string> AddFileAsync(string base64file);
         string GenerateId(string filePath);
         Task<bool> SaveToDatabaseAsync(string fileName, string? decription = null);
         Task<string?> GetFilePathAsync(string fileId, int extentionID);

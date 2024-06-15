@@ -1,10 +1,7 @@
 ﻿using ContentManager_Server.DatabaseEntityCore;
-using System;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
-using static Microsoft.EntityFrameworkCore.DbLoggerCategory.Database;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace ContentManager_Server
 {
@@ -17,7 +14,7 @@ namespace ContentManager_Server
         private Aes aes;
         private string clientId;
         private string remoteEndPoint;
-        private User? currentUser;
+        public User? CurrentUser { get; private set; }
 
         public ClientHandler(TcpClient client, string clientId, string remoteEndPoint) : base("ClientHandler")
         {
@@ -30,14 +27,21 @@ namespace ContentManager_Server
             aes.IV = Encoding.UTF8.GetBytes("U9htdlFa3As7n9nD");
         }
 
+        public IClientMessageObserver? GetAuthClientHandler()
+        {
+            if (observers.Count > 0)
+                return observers[0];
+            return null;
+        } 
+
         public void SetCurrentUser(User user)
         {
-            currentUser = user;
+            CurrentUser = user;
         }
 
         public void ResetCurrentUser()
         {
-            currentUser = null;
+            CurrentUser = null;
         }
 
         public void HandleClient()
@@ -52,8 +56,8 @@ namespace ContentManager_Server
                     writer = TextWriter.Synchronized(new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true });
                     string? loadingImageBase64 = Server.ImageService?.GetFileInStringFormat(Server.ImageService.LoadingImage);
 
-                    if (!string.IsNullOrEmpty(loadingImageBase64))
-                        SendMessageToClient("setloadingimage", new List<string> { loadingImageBase64 });
+                    //if (!string.IsNullOrEmpty(loadingImageBase64))
+                    //    SendMessageToClient("setloadingimage", new List<string> { loadingImageBase64 });
 
                     StringBuilder clientMessageBuilder = new StringBuilder();
                     string clientMessageChunk;
@@ -63,8 +67,7 @@ namespace ContentManager_Server
                         {
                             string encryptedMessage = clientMessageBuilder.ToString();
 
-                            // Логирование для отладки
-                            Logger.Instance.Log($"Complete encrypted message: {encryptedMessage}", this);
+                            //Logger.Instance.Log($"Complete encrypted message: {encryptedMessage}", this);
 
                             try
                             {
@@ -82,8 +85,7 @@ namespace ContentManager_Server
                         {
                             string chunkData = clientMessageChunk.Remove(0, 7); // Убираем префикс ~chunk~
 
-                            // Логирование для отладки
-                            Logger.Instance.Log($"Received chunk: {chunkData}", this);
+                            //Logger.Instance.Log($"Received chunk: {chunkData}", this);
 
                             clientMessageBuilder.Append(chunkData);
                         }
@@ -223,7 +225,7 @@ namespace ContentManager_Server
                     return true;
             }
 
-            string[] parts = data.Split('~');
+            string[] parts = data.Split("~sp~");
             string command = parts[0];
             string[] args = parts.Skip(1).ToArray();
 
@@ -258,6 +260,7 @@ namespace ContentManager_Server
                 {
                     imageFile
                 };
+                //await Task.Delay(2000);
                 SendImages(images);
             }
         }
@@ -279,7 +282,7 @@ namespace ContentManager_Server
 
         private async void HandleRegistration(string[] args)
         {
-            if (currentUser != null)
+            if (CurrentUser != null)
                 return;
             if (args.Length != 2)
                 return;
@@ -301,12 +304,15 @@ namespace ContentManager_Server
                 return;
             }
 
+            if (Server.DatabaseController == null)
+                return;
             bool loginIsTaken = await Server.DatabaseController.IsLoginTakenAsync(login);
             if (loginIsTaken)
                 SendMessageToClient("reg_result", "login_is_taken");
             else
             {
-                bool added = await Server.DatabaseController.AddEntityAsync(currentUser = new User { Login = login, PasswordHash = HashPassword(password), FixedKey = clientId, RoleId = 4 });
+                string? avatarId = await Server.DatabaseController.GetDefaultUserAvatarKeyAsync();
+                bool added = await Server.DatabaseController.AddEntityAsync(CurrentUser = new User { Login = login, PasswordHash = HashPassword(password), FixedKey = clientId, RoleId = 4, AvatarId = avatarId ?? string.Empty });
                 if (added)
                     SendMessageToClient("reg_result", "completed");
                 else
@@ -316,7 +322,7 @@ namespace ContentManager_Server
 
         private async void HandleAuthentication(string[] args)
         {
-            if (currentUser != null)
+            if (CurrentUser != null)
                 return;
             if (args.Length != 2)
                 return;
@@ -338,27 +344,31 @@ namespace ContentManager_Server
                 return;
             }
 
-            try
+            if (Server.DatabaseController != null)
             {
-                User user = await Server.DatabaseController.GetUserByLoginAsync<User>(login);
-                if (user != null)
+                try
                 {
-                    bool correctPass = ValidatePassword(password, user.PasswordHash);
-                    if (correctPass)
+                    User? user = await Server.DatabaseController.GetUserByLoginAsync(login);
+                    string nullId = "-1";
+                    if (user != null)
                     {
-                        AddObserver(new AuthClientHandler(this, user));
-                        SendMessageToClient("auth_result", "allowed", user.RoleId.ToString());
-                        currentUser = user;
+                        bool correctPass = ValidatePassword(password, user.PasswordHash);
+                        if (correctPass)
+                        {
+                            AddObserver(new AuthClientHandler(this, user));
+                            SendMessageToClient("auth_result", "allowed", user.RoleId.ToString(), user.Id.ToString());
+                            CurrentUser = user;
+                        }
+                        else
+                            SendMessageToClient("auth_result", "incorrect_pass", nullId, nullId);
                     }
                     else
-                        SendMessageToClient("auth_result", "incorrect_pass", "-1");
+                        SendMessageToClient("auth_result", "incorrect", nullId, nullId);
                 }
-                else
-                    SendMessageToClient("auth_result", "incorrect", "-1");
-            }
-            catch (Exception ex)
-            {
-                Logger.Instance.Log($"Ошибка при авторизации клиента '{clientId}': {ex.Message}", this);
+                catch (Exception ex)
+                {
+                    Logger.Instance.Log($"Ошибка при авторизации клиента '{clientId}': {ex.Message}", this);
+                }
             }
         }
 
@@ -380,10 +390,7 @@ namespace ContentManager_Server
 
         public static bool ValidatePassword(string enteredPassword, string storedHash)
         {
-            // Hash the entered password
             string enteredHash = HashPassword(enteredPassword);
-
-            // Compare the hashes
             return string.Equals(enteredHash, storedHash, StringComparison.OrdinalIgnoreCase);
         }
 

@@ -1,4 +1,5 @@
 ﻿using ContentManager_Server.DatabaseEntityCore;
+using System.Security.Cryptography;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace ContentManager_Server
@@ -20,59 +21,110 @@ namespace ContentManager_Server
             Logger.Instance.Log("ImageService started.", this);
         }
 
-        public async Task AddFileAsync()
+        public async Task<string> AddFileAsync(string? base64 = null)
         {
-            string filePath = FilePicker.ShowDialog();
+            if (string.IsNullOrEmpty(base64))
+            {
+                string filePath = FilePicker.ShowDialog();
+                string imageId = GenerateId(filePath);
 
-            if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                if (!string.IsNullOrEmpty(filePath) && File.Exists(filePath))
+                {
+                    try
+                    {
+                        string fileExtension = Path.GetExtension(filePath).ToLower();
+                        if (fileExtension == ".png" || fileExtension == ".gif")
+                        {
+                            string newFileName = imageId + fileExtension;
+                            string destinationPath = Path.Combine(imagesDirectory, newFileName);
+
+                            if (File.Exists(destinationPath))
+                            {
+                                Logger.Instance.Log($"Image already exists with ID: {imageId}.", this);
+                                return imageId;
+                            }
+
+                            File.Copy(filePath, destinationPath);
+
+                            Logger.Instance.Log("Введите описание изображения (ВАЖНО!). Если не знаете, для чего это, просто нажмите клавишу Enter.", this);
+                            string? imageDescription = Console.ReadLine();
+                            bool saved = await SaveToDatabaseAsync(imageId, imageDescription);
+                            if (saved)
+                                Logger.Instance.Log($"Image {newFileName} added successfully.", this);
+                            else
+                            {
+                                Logger.Instance.Log($"Error when saving image to database.", this);
+                                File.Delete(destinationPath);
+                            }
+                            return imageId;
+                        }
+                        else
+                        {
+                            Logger.Instance.Log("Selected file is not a valid image.", this);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Instance.Log($"Error adding image: {ex.Message}", this);
+                        return imageId;
+                    }
+                }
+                else
+                {
+                    Logger.Instance.Log("File does not exist or file picker was cancelled.", this);
+                    return imageId;
+                }
+                return imageId;
+            }
+            else
             {
                 try
                 {
-                    string fileExtension = Path.GetExtension(filePath).ToLower();
-                    if (fileExtension == ".png" || fileExtension == ".gif")
+                    string imageId = GenerateIdFromBase64String(base64);
+                    string newFileName = imageId + ".img";
+                    string destinationPath = Path.Combine(imagesDirectory, newFileName);
+                    byte[] fileBytes = Convert.FromBase64String(base64);
+
+                    if (File.Exists(destinationPath))
                     {
-                        string imageId = GenerateId(filePath);
-                        string newFileName = imageId + fileExtension;
-                        string destinationPath = Path.Combine(imagesDirectory, newFileName);
-
-                        if (File.Exists(destinationPath))
-                        {
-                            Logger.Instance.Log($"Image already exists with ID: {imageId}.", this);
-                            return;
-                        }
-
-                        File.Copy(filePath, destinationPath);
-
-                        Logger.Instance.Log("Введите описание изображения (ВАЖНО!). Если не знаете, для чего это, просто нажмите клавишу Enter.", this);
-                        string? imageDescription = Console.ReadLine();
-                        bool saved = await SaveToDatabaseAsync(imageId, imageDescription);
-                        if (saved)
-                            Logger.Instance.Log($"Image {newFileName} added successfully.", this);
-                        else
-                        {
-                            Logger.Instance.Log($"Error when saving image to database.", this);
-                            File.Delete(destinationPath);
-                        }
+                        Logger.Instance.Log($"Image already exists with ID: {imageId}.", this);
+                        return imageId;
                     }
+
+                    File.WriteAllBytes(destinationPath, fileBytes);
+                    bool saved = await SaveToDatabaseAsync(imageId, null);
+                    if (saved)
+                        Logger.Instance.Log($"Image {newFileName} added successfully.", this);
                     else
                     {
-                        Logger.Instance.Log("Selected file is not a valid image.", this);
+                        Logger.Instance.Log($"Error when saving image to database.", this);
+                        File.Delete(destinationPath);
                     }
+                    return imageId;
                 }
                 catch (Exception ex)
                 {
                     Logger.Instance.Log($"Error adding image: {ex.Message}", this);
+                    return string.Empty;
                 }
             }
-            else
+        }
+
+        public string GenerateIdFromBase64String(string base64)
+        {
+            using (var sha256 = SHA256.Create())
             {
-                Logger.Instance.Log("File does not exist or file picker was cancelled.", this);
+                byte[] fileBytes = Convert.FromBase64String(base64);
+                byte[] hashBytes = sha256.ComputeHash(fileBytes);
+                string hashString = BitConverter.ToString(hashBytes).Replace("-", "").ToLower();
+
+                return hashString;
             }
         }
 
         public string GenerateId(string filePath)
         {
-            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+            using (var sha256 = SHA256.Create())
             {
                 using (var stream = File.OpenRead(filePath))
                 {

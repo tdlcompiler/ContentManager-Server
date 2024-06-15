@@ -1,4 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
+﻿using Newtonsoft.Json;
+using System.ComponentModel.DataAnnotations;
 
 namespace ContentManager_Server.DatabaseEntityCore
 {
@@ -7,7 +8,7 @@ namespace ContentManager_Server.DatabaseEntityCore
         public int Id { get; set; }
 
         [Required]
-        public string Title { get; set; }
+        public string Title { get; set; } = string.Empty;
 
         [Required]
         public DateTime CreationDate { get; set; }
@@ -17,6 +18,7 @@ namespace ContentManager_Server.DatabaseEntityCore
         public int AuthorId { get; set; }
         public Author Author { get; set; }
 
+        [JsonIgnore]
         public ICollection<Chapter> Chapters { get; set; }
     }
 }

@@ -2,9 +2,10 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using Microsoft.Extensions.Logging;
 using System.Text;
 using Newtonsoft.Json;
+using ContentManager_Server.DatabaseEntityCore;
+using ContentManager_Server.FileServices;
 
 namespace ContentManager_Server
 {
@@ -14,7 +15,8 @@ namespace ContentManager_Server
         private const string CONFIG_PATH = "server_config.json";
         public static DBController? DatabaseController { get; private set; }
         public static ImageService? ImageService { get; private set; }
-        private static ConsoleService? ConsoleService;
+        public static PrefabService? PrefabService { get; private set; }
+        public static ConsoleService? ConsoleService { get; private set; }
         private static TcpListener? listener;
         private static CancellationTokenSource cancellationTokenSource = new CancellationTokenSource();
         private static ManualResetEvent shutdownEvent = new ManualResetEvent(false);
@@ -29,7 +31,7 @@ namespace ContentManager_Server
                 {
                     try
                     {
-                        StackTrace currentStackTrace;
+                        StackTrace? currentStackTrace;
 
                         try
                         {
@@ -63,6 +65,7 @@ namespace ContentManager_Server
             int port = 12361; // стандартный порт
 
             DatabaseController = new DBController("127.0.0.1", "contentmanagerapp_db", "root", "DeNiskA22565");
+            await DatabaseController.NormalizeTablesAsync();
 
             try
             {
@@ -81,10 +84,10 @@ namespace ContentManager_Server
                 Logger.Instance.Log($"Error reading config file: {ex.Message}. Using default port 12361.");
             }
 
-            await DatabaseController.NormalizeTablesAsync();
-
             ImageService = new ImageService(DatabaseController);
             ImageService.LoadingImage = await DatabaseController.GetLoadingImageFileAsync();
+
+            PrefabService = new PrefabService(DatabaseController);
 
             listener = new TcpListener(IPAddress.Any, port);
             listener.Start();
@@ -96,8 +99,8 @@ namespace ContentManager_Server
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
             Console.CancelKeyPress += (sender, e) =>
             {
-                e.Cancel = true; // Предотвращаем закрытие консоли по умолчанию
-                CloseServer();   // Закрываем сервер
+                e.Cancel = true;
+                CloseServer();
             };
 
             await AcceptClientsAsync(cancellationTokenSource.Token);
@@ -151,11 +154,62 @@ namespace ContentManager_Server
             client.SendMessageToClient(message);
         }
 
-        public static void SendMessageToAllClients(string message)
+        public static void SendMessageToAllClients(params string[] args)
         {
             foreach (ClientHandler client in clients.Values)
             {
-                client.SendMessageToClient(message);
+                client.SendMessageToClient(args);
+            }
+        }
+
+        public static void SendUpdateUserToOwners(User user)
+        {
+            SendMessageToAuthClients(UserType.OWNER, "updateuser", JsonUtils.UsersToJsonByOwnerRequest(new List<User> { user }));
+        }
+
+        public static void SendUpdateAuthorToUsers(Author author)
+        {
+            string command = "updateauthor";
+            string json = JsonUtils.AuthorsToJsonByUserRequest(new List<Author> { author });
+            SendMessageToAuthClients(UserType.ADMINISTRATOR, command, json);
+            SendMessageToAuthClients(UserType.EDITOR, command, json);
+            SendMessageToAuthClients(UserType.RO_USER, command, json);
+        }
+
+        public static void SendRemoveUserToOwners(int userId)
+        {
+            SendMessageToAuthClients(UserType.OWNER, "removeuser", userId.ToString());
+        }
+
+        public static void SendRemoveAuthorToUsers(int authorId)
+        {
+            string command = "removeauthor";
+            string strAuthorId = authorId.ToString();
+            SendMessageToAuthClients(UserType.OWNER, command, strAuthorId);
+            SendMessageToAuthClients(UserType.EDITOR, command, strAuthorId);
+            SendMessageToAuthClients(UserType.RO_USER, command, strAuthorId);
+        }
+
+        public static AuthClientHandler? GetAuthClientHandlerByUserId(int userId)
+        {
+            AuthClientHandler? authClientHandler = null;
+            foreach (ClientHandler client in clients.Values)
+            {
+                if (client?.CurrentUser?.Id == userId)
+                {
+                    authClientHandler = client.GetAuthClientHandler() as AuthClientHandler;
+                    break;
+                }
+            }
+            return authClientHandler;
+        }
+
+        public static void SendMessageToAuthClients(UserType role, params string[] message)
+        {
+            foreach (ClientHandler client in clients.Values)
+            {
+                if (client?.CurrentUser?.RoleId == (int)role)
+                    client.SendMessageToClient(message);
             }
         }
 
