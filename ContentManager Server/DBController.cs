@@ -12,13 +12,31 @@
 
         public DBController(string server, string database, string uid, string password) : base("DatabaseController")
         {
-            var connectionString = $"Server={server};Database={database};Uid={uid};Pwd={password};";
-            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
-            optionsBuilder.UseMySql(connectionString, new MySqlServerVersion(new Version(5, 7, 39)));
-            optionsBuilder.EnableSensitiveDataLogging();
+            try
+            {
+                var connectionString = $"Server={server};Database={database};Uid={uid};Pwd={password};";
+                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                optionsBuilder.UseMySql(connectionString, new MySqlServerVersion(new Version(5, 7, 39)));
+                optionsBuilder.EnableSensitiveDataLogging();
 
-            _contextManager = new DbContextManager(optionsBuilder.Options);
-            Logger.Instance.Log("DatabaseController started.", this);
+                using (var context = new ApplicationDbContext(optionsBuilder.Options))
+                {
+                    context.Database.OpenConnection();
+                    context.Database.CloseConnection();
+                }
+
+                _contextManager = new DbContextManager(optionsBuilder.Options);
+                Logger.Instance.Log($"DatabaseController {database} started.", this);
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log($"Failed to connect to the database '{database}'. Please, edit 'server_config.json' and try again. Error: {ex.Message}", this);
+
+                while (true)
+                {
+                    Thread.Sleep(Timeout.Infinite);
+                }
+            }
         }
 
         public async Task NormalizeTablesAsync()
@@ -175,7 +193,7 @@
             }
         }
 
-        public async Task<List<Message>?> GetChapterMessagesInRange(int chapterId, int startIndex, int endIndex)
+        public async Task<List<Message>?> GetChapterMessagesInRangeAsync(int chapterId, int startIndex, int endIndex)
         {
             using var context = _contextManager.CreateDbContext();
             try
@@ -201,6 +219,32 @@
             }
         }
 
+        public async Task<List<Message>?> GetChapterMessagesAsync(int chapterId)
+        {
+            using var context = _contextManager.CreateDbContext();
+            try
+            {
+                var entities = await context.Message
+                                            .Where(a => a.ChapterId == chapterId)
+                                            .Select(a => new Message
+                                            {
+                                                Id = a.Id,
+                                                ChapterId = a.ChapterId,
+                                                Content = a.Content ?? string.Empty,
+                                                MessageTypeId = a.MessageTypeId,
+                                                SenderName = a.SenderName ?? string.Empty
+                                            })
+                                            .ToListAsync();
+                Logger.Instance.Log($"All entities of type {typeof(Message).Name} with chapterId: {chapterId} retrieved successfully.", this);
+                return entities;
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
         public async Task<List<Novel>?> GetNovelsInRangeAsync(int startIndex, int endIndex)
         {
             using var context = _contextManager.CreateDbContext();
@@ -213,6 +257,26 @@
                                             .AsNoTracking()
                                             .ToListAsync();
                 Logger.Instance.Log($"Entities of type {typeof(Novel).Name} with Ids from {startIndex} to {endIndex} retrieved successfully.", this);
+                return entities;
+            }
+            catch (Exception ex)
+            {
+                Logger.Instance.Log("Error: " + ex.Message, this);
+                return null;
+            }
+        }
+
+        public async Task<List<Novel>?> GetAllNovelsAsync()
+        {
+            using var context = _contextManager.CreateDbContext();
+            try
+            {
+                var entities = await context.Novel
+                                            .Include(n => n.Author)
+                                            .Include(n => n.Chapters)
+                                            .AsNoTracking()
+                                            .ToListAsync();
+                Logger.Instance.Log($"All entities of type {typeof(Novel).Name} retrieved successfully.", this);
                 return entities;
             }
             catch (Exception ex)

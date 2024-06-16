@@ -7,7 +7,7 @@ namespace ContentManager_Server
     {
         public static string ToJson(object obj)
         {
-            return JsonConvert.SerializeObject(obj, Formatting.Indented);
+            return JsonConvert.SerializeObject(obj, Formatting.None);
         }
 
         public static string UsersToJsonByOwnerRequest(List<User> users)

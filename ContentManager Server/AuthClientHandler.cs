@@ -150,19 +150,37 @@ namespace ContentManager_Server
 
         private async Task<bool> HandleGetMessagesList(string[] args)
         {
-            if ((UserIs(UserType.ADMINISTRATOR) || UserIs(UserType.EDITOR) || UserIs(UserType.RO_USER)) && Server.DatabaseController != null && args.Length == 3 && int.TryParse(args[0], out int chapterId) && int.TryParse(args[1], out int startIndex) && int.TryParse(args[2], out int endIndex))
+            if ((UserIs(UserType.ADMINISTRATOR) || UserIs(UserType.EDITOR) || UserIs(UserType.RO_USER)) && Server.DatabaseController != null)
             {
-                List<Message>? messagesInRange = await Server.DatabaseController.GetChapterMessagesInRange(chapterId, startIndex, endIndex);
+                if (args.Length == 3 && int.TryParse(args[0], out int chapterId) && int.TryParse(args[1], out int startIndex) && int.TryParse(args[2], out int endIndex))
+                {
+                    List<Message>? messagesInRange = await Server.DatabaseController.GetChapterMessagesInRangeAsync(chapterId, startIndex, endIndex);
 
-                if (messagesInRange != null && messagesInRange.Any())
-                {
-                    string messagesInJson = JsonUtils.MessagesToJsonByUserRequest(messagesInRange);
-                    SendMessageToClient("setmessages", messagesInJson);
-                    return true;
+                    if (messagesInRange != null && messagesInRange.Any())
+                    {
+                        string messagesInJson = JsonUtils.MessagesToJsonByUserRequest(messagesInRange);
+                        SendMessageToClient("setmessages", messagesInJson);
+                        return true;
+                    }
+                    else
+                    {
+                        SendMessageToClient("setmessages", "[]");
+                    }
                 }
-                else
+                else if (args.Length == 1 && int.TryParse(args[0], out chapterId))
                 {
-                    SendMessageToClient("setmessages", "[]");
+                    List<Message>? messagesInRange = await Server.DatabaseController.GetChapterMessagesAsync(chapterId);
+
+                    if (messagesInRange != null && messagesInRange.Any())
+                    {
+                        string messagesInJson = JsonUtils.MessagesToJsonByUserRequest(messagesInRange);
+                        SendMessageToClient("setallmessages", messagesInJson);
+                        return true;
+                    }
+                    else
+                    {
+                        SendMessageToClient("setallmessages", "[]");
+                    }
                 }
             }
             return false;
@@ -170,19 +188,37 @@ namespace ContentManager_Server
 
         private async Task<bool> HandleGetNovelList(string[] args)
         {
-            if ((UserIs(UserType.ADMINISTRATOR) || UserIs(UserType.EDITOR) || UserIs(UserType.RO_USER)) && Server.DatabaseController != null && args.Length == 2 && int.TryParse(args[0], out int startIndex) && int.TryParse(args[1], out int endIndex))
+            if ((UserIs(UserType.ADMINISTRATOR) || UserIs(UserType.EDITOR) || UserIs(UserType.RO_USER)) && Server.DatabaseController != null)
             {
-                List<Novel>? novelsInRange = await Server.DatabaseController.GetNovelsInRangeAsync(startIndex, endIndex);
+                if (args.Length == 2 && int.TryParse(args[0], out int startIndex) && int.TryParse(args[1], out int endIndex))
+                {
+                    List<Novel>? novelsInRange = await Server.DatabaseController.GetNovelsInRangeAsync(startIndex, endIndex);
 
-                if (novelsInRange != null && novelsInRange.Any())
-                {
-                    string novelsInJson = JsonUtils.NovelsToJsonByUserRequest(novelsInRange);
-                    SendMessageToClient("setnovels", novelsInJson);
-                    return true;
+                    if (novelsInRange != null && novelsInRange.Any())
+                    {
+                        string novelsInJson = JsonUtils.NovelsToJsonByUserRequest(novelsInRange);
+                        SendMessageToClient("setnovels", novelsInJson);
+                        return true;
+                    }
+                    else
+                    {
+                        SendMessageToClient("setnovels", "[]");
+                    }
                 }
-                else
+                else if (args.Length == 0)
                 {
-                    SendMessageToClient("setnovels", "[]");
+                    List<Novel>? allNovels = await Server.DatabaseController.GetAllNovelsAsync();
+
+                    if (allNovels != null && allNovels.Any())
+                    {
+                        string novelsInJson = JsonUtils.NovelsToJsonByUserRequest(allNovels);
+                        SendMessageToClient("setallnovels", novelsInJson);
+                        return true;
+                    }
+                    else
+                    {
+                        SendMessageToClient("setallnovels", "[]");
+                    }
                 }
             }
             return false;
@@ -326,19 +362,37 @@ namespace ContentManager_Server
 
         private async Task<bool> HandleGetAuthorList(string[] args)
         {
-            if ((UserIs(UserType.ADMINISTRATOR) || UserIs(UserType.EDITOR) || UserIs(UserType.RO_USER)) && Server.DatabaseController != null && args.Length == 2 && int.TryParse(args[0], out int startIndex) && int.TryParse(args[1], out int endIndex))
+            if ((UserIs(UserType.ADMINISTRATOR) || UserIs(UserType.EDITOR) || UserIs(UserType.RO_USER)) && Server.DatabaseController != null)
             {
-                List<Author>? authorsInRange = await Server.DatabaseController.GetAuthorsInRangeAsync(startIndex, endIndex);
+                if (args.Length == 2 && int.TryParse(args[0], out int startIndex) && int.TryParse(args[1], out int endIndex))
+                {
+                    List<Author>? authorsInRange = await Server.DatabaseController.GetAuthorsInRangeAsync(startIndex, endIndex);
 
-                if (authorsInRange != null && authorsInRange.Any())
-                {
-                    string authorsInJson = JsonUtils.AuthorsToJsonByUserRequest(authorsInRange);
-                    SendMessageToClient("setauthors", authorsInJson);
-                    return true;
+                    if (authorsInRange != null && authorsInRange.Any())
+                    {
+                        string authorsInJson = JsonUtils.AuthorsToJsonByUserRequest(authorsInRange);
+                        SendMessageToClient("setauthors", authorsInJson);
+                        return true;
+                    }
+                    else
+                    {
+                        SendMessageToClient("setauthors", "[]");
+                    }
                 }
-                else
+                else if (args.Length == 0)
                 {
-                    SendMessageToClient("setauthors", "[]");
+                    List<Author>? allAuthors = await Server.DatabaseController.GetAllEntitiesAsync<Author>();
+
+                    if (allAuthors != null && allAuthors.Any())
+                    {
+                        string authorsInJson = JsonUtils.AuthorsToJsonByUserRequest(allAuthors);
+                        SendMessageToClient("setallauthors", authorsInJson);
+                        return true;
+                    }
+                    else
+                    {
+                        SendMessageToClient("setallauthors", "[]");
+                    }
                 }
             }
             return false;

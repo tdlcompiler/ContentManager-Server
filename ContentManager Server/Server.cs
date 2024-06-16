@@ -26,13 +26,20 @@ namespace ContentManager_Server
         static async Task Main(string[] args)
         {
             int port = 12361;
-
-            DatabaseController = new DBController("127.0.0.1", "contentmanagerapp_db", "root", "DeNiskA22565");
-            await DatabaseController.NormalizeTablesAsync();
+            string dbEndPoint = string.Empty;
+            string dbName = string.Empty;
+            string dbUsername = string.Empty;
+            string dbPass = string.Empty;
 
             try
             {
                 var config = ReadConfig(CONFIG_PATH);
+
+                dbEndPoint = config.DBEndPoint;
+                dbName = config.DBName;
+                dbUsername = config.DBCredentials.Username;
+                dbPass = config.DBCredentials.Password;
+
                 if (config?.Port > 0 && config.Port <= 65535)
                 {
                     port = config.Port;
@@ -46,6 +53,8 @@ namespace ContentManager_Server
             {
                 Logger.Instance.Log($"Error reading config file: {ex.Message}. Using default port 12361.");
             }
+            DatabaseController = new DBController(dbEndPoint, dbName, dbUsername, dbPass);
+            await DatabaseController.NormalizeTablesAsync();
 
             ImageService = new ImageService(DatabaseController);
             ImageService.LoadingImage = await DatabaseController.GetLoadingImageFileAsync();
@@ -57,7 +66,7 @@ namespace ContentManager_Server
             Logger.Instance.Log($"Server started on port {port}...");
 
             ConsoleService = new ConsoleService();
-s
+
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
             Console.CancelKeyPress += (sender, e) =>
             {
@@ -238,5 +247,14 @@ s
     class ServerConfig
     {
         public int Port { get; set; } = 12361;
+        public string DBName { get; set; } = "contentmanagerapp_db";
+        public string DBEndPoint { get; set; } = "localhost";
+        public DBCredentialsEntity DBCredentials { get; set; } = new DBCredentialsEntity { };
+
+        public class DBCredentialsEntity
+        {
+            public string Username { get; set; } = string.Empty;
+            public string Password { get; set; } = string.Empty;
+        }
     }
 }
